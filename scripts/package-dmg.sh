@@ -5,11 +5,13 @@
 #   ./scripts/package-dmg.sh
 #   ./scripts/package-dmg.sh --zip          # 额外打 zip
 #   ./scripts/package-dmg.sh --keep-build   # 保留中间编译产物
+#   ./scripts/package-dmg.sh --unsigned     # 关闭代码签名（CI 默认）
 #
 # 前置：
 #   1. 已安装完整 Xcode（不只是 Command Line Tools）
 #   2. sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-#   3. 在 Xcode 里给 Target 选好 Signing Team（至少本地签名）
+#   3. 本地签名打包时，在 Xcode 里给 Target 选好 Signing Team
+#   4. GitHub Actions 会自动走 --unsigned（无需 Team）
 
 set -euo pipefail
 
@@ -29,18 +31,25 @@ ZIP_PATH=""
 
 MAKE_ZIP=0
 KEEP_BUILD=0
+UNSIGNED=0
+
+# GitHub Actions 默认无签名，避免缺少 DEVELOPMENT_TEAM 导致失败
+if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+  UNSIGNED=1
+fi
 
 for arg in "$@"; do
   case "$arg" in
     --zip) MAKE_ZIP=1 ;;
     --keep-build) KEEP_BUILD=1 ;;
+    --unsigned) UNSIGNED=1 ;;
     -h|--help)
-      sed -n '2,14p' "$0"
+      sed -n '2,15p' "$0"
       exit 0
       ;;
     *)
       echo "未知参数: $arg"
-      echo "支持: --zip  --keep-build  --help"
+      echo "支持: --zip  --keep-build  --unsigned  --help"
       exit 1
       ;;
   esac
@@ -51,16 +60,18 @@ fail() { printf '错误：%s\n' "$*" >&2; exit 1; }
 
 # --- 环境检查 -------------------------------------------------------------
 
-if [[ ! -d "/Applications/Xcode.app" ]]; then
-  fail "未找到 /Applications/Xcode.app。请先从 App Store 安装完整 Xcode。"
+DEVELOPER_DIR="$(xcode-select -p 2>/dev/null || true)"
+if [[ "$DEVELOPER_DIR" != *"/Contents/Developer" ]]; then
+  fail "当前开发者目录无效：$DEVELOPER_DIR
+请安装完整 Xcode，并执行：
+  sudo xcode-select -s /Applications/Xcode.app/Contents/Developer"
 fi
 
-DEVELOPER_DIR="$(xcode-select -p 2>/dev/null || true)"
-if [[ "$DEVELOPER_DIR" != *"/Xcode.app/Contents/Developer" ]]; then
-  fail "当前开发者目录是：$DEVELOPER_DIR
-请执行：
-  sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-然后再运行本脚本。"
+# 本地要求 Xcode.app；CI runner 可能是 Xcode_16.app 等版本化路径
+if [[ "${GITHUB_ACTIONS:-}" != "true" ]]; then
+  if [[ ! -d "/Applications/Xcode.app" && "$DEVELOPER_DIR" != *"/Xcode"*".app/Contents/Developer" ]]; then
+    fail "未找到 Xcode.app。请先从 App Store 安装完整 Xcode。"
+  fi
 fi
 
 if ! xcodebuild -version >/dev/null 2>&1; then
@@ -69,6 +80,11 @@ fi
 
 log "Xcode 版本"
 xcodebuild -version
+if [[ "$UNSIGNED" -eq 1 ]]; then
+  log "签名：关闭（--unsigned / CI）"
+else
+  log "签名：使用工程 Automatic Signing"
+fi
 
 # --- 清理 / 准备 ----------------------------------------------------------
 
@@ -79,6 +95,15 @@ mkdir -p "$DERIVED" "$EXPORT_DIR"
 # --- 编译 -----------------------------------------------------------------
 
 log "编译 Release（arm64 + x86_64）"
+SIGN_ARGS=()
+if [[ "$UNSIGNED" -eq 1 ]]; then
+  SIGN_ARGS=(
+    CODE_SIGNING_ALLOWED=NO
+    CODE_SIGNING_REQUIRED=NO
+    CODE_SIGN_IDENTITY=
+  )
+fi
+
 xcodebuild \
   -project "$PROJECT" \
   -scheme "$SCHEME" \
@@ -87,6 +112,7 @@ xcodebuild \
   -derivedDataPath "$DERIVED" \
   ONLY_ACTIVE_ARCH=NO \
   BUILD_LIBRARY_FOR_DISTRIBUTION=NO \
+  "${SIGN_ARGS[@]}" \
   build
 
 APP_SRC="$(find "$DERIVED/Build/Products/Release" -maxdepth 1 -name "${APP_NAME}.app" -type d | head -n 1 || true)"
@@ -102,7 +128,12 @@ BINARY="$APP_DST/Contents/MacOS/${APP_NAME}"
 
 log "架构信息"
 if command -v lipo >/dev/null 2>&1; then
-  lipo -info "$BINARY" || true
+  ARCH_INFO="$(lipo -info "$BINARY")"
+  echo "$ARCH_INFO"
+  echo "$ARCH_INFO" | grep -q 'arm64' || fail "缺少 arm64 架构"
+  echo "$ARCH_INFO" | grep -q 'x86_64' || fail "缺少 x86_64 架构"
+else
+  fail "未找到 lipo，无法校验架构"
 fi
 
 log "代码签名信息"
@@ -187,8 +218,20 @@ cat <<EOF
   双击 DMG → 把「${APP_NAME}」拖到 Applications
 
 注意：
+EOF
+
+if [[ "$UNSIGNED" -eq 1 ]]; then
+  cat <<EOF
+  • 本包未签名（--unsigned / CI），仅适合构建验证，不宜直接分发
+EOF
+else
+  cat <<EOF
   • 本包为本地/Automatic 签名，其他 Mac 首次打开可能需：
     右键 App → 打开，或在「隐私与安全性」里仍允许打开
+EOF
+fi
+
+cat <<EOF
   • 若要无提示分发，需加入 Apple Developer Program，
     使用 Developer ID 签名并 notarize（公证）
   • 改版本号：Xcode → Target → General → Version / Build

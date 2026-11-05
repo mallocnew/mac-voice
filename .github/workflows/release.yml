@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build & Publish
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: 输出工具链信息
+      run: |
+        sw_vers
+        xcodebuild -version
+        xcode-select -p
+
+    - name: 打包 Release
+      run: |
+        set -o pipefail
+        ./scripts/package-dmg.sh --zip 2>&1 | tee build.log
+
+    - name: 上传构建日志
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-build-logs
+        path: build.log
+        if-no-files-found: ignore
+        retention-days: 7
+
+    - name: 创建 GitHub Release 并上传产物
+      uses: softprops/action-gh-release@v2
+      with:
+        # 只上传带版本号的文件，避开 MiniVoice.dmg / .zip 软链
+        files: |
+          dist/MiniVoice-*.dmg
+          dist/MiniVoice-*.zip
+        generate_release_notes: true
+        fail_on_unmatched_files: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
