@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build & Package
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: 输出工具链信息
+      run: |
+        sw_vers
+        xcodebuild -version
+        xcode-select -p
+
+    - name: 打包 Release（调用 package-dmg.sh）
+      run: |
+        set -o pipefail
+        # --zip：额外用 ditto 打一份 .zip，方便不挂载 DMG 直接下载解压
+        ./scripts/package-dmg.sh --zip 2>&1 | tee build.log
+
+    - name: 上传构建日志
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs
+        path: build.log
+        if-no-files-found: ignore
+        retention-days: 7
+
+    - name: 上传 .app 产物
+      uses: actions/upload-artifact@v4
+      with:
+        name: MiniVoice-release-app
+        path: dist/export/MiniVoice.app
+        if-no-files-found: error
+        retention-days: 7
+
+    - name: 上传 DMG / ZIP
+      uses: actions/upload-artifact@v4
+      with:
+        name: MiniVoice-dmg
+        path: |
+          dist/*.dmg
+          dist/*.zip
+        if-no-files-found: error
+        retention-days: 7
+
+    # 放在产物上传之后：分析失败仍会让 job 失败，但不丢已上传的 artifact
+    - name: 静态分析
+      run: |
+        set -o pipefail
+        xcodebuild \
+          -project MacVoice.xcodeproj \
+          -scheme MacVoice \
+          -configuration Debug \
+          -destination "platform=macOS" \
+          -derivedDataPath build/DerivedData \
+          CODE_SIGNING_ALLOWED=NO \
+          CODE_SIGNING_REQUIRED=NO \
+          CODE_SIGN_IDENTITY= \
+          analyze 2>&1 | tee analyze.log
+
+    - name: 上传分析日志
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: analyze-logs
+        path: analyze.log
+        if-no-files-found: ignore
+        retention-days: 7
