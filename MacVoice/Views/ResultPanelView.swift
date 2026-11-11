@@ -45,24 +45,7 @@ struct ResultPanelView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
                         ForEach(appState.segments) { seg in
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack(spacing: 8) {
-                                    Text(seg.timeLabel)
-                                        .font(.caption.monospacedDigit())
-                                        .foregroundStyle(.secondary)
-                                    if !seg.speaker.isEmpty {
-                                        Text(seg.speaker)
-                                            .font(.caption.weight(.semibold))
-                                            .foregroundStyle(Color.accentColor)
-                                    }
-                                }
-                                Text(seg.text)
-                                    .font(.body)
-                                    .textSelection(.enabled)
-                            }
-                            .padding(10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            segmentRow(seg)
                         }
                     }
                 }
@@ -81,5 +64,46 @@ struct ResultPanelView: View {
             if newValue.isEmpty { showSegments = false }
             else if appState.selectedModel == .diarize { showSegments = true }
         }
+    }
+
+    @ViewBuilder
+    private func segmentRow(_ seg: TranscriptSegment) -> some View {
+        let playing = appState.audioPlayer.activeRange.map {
+            $0.start == seg.start && $0.end == seg.end
+        } ?? false
+
+        HStack(alignment: .top, spacing: 10) {
+            Button {
+                appState.toggleSegmentPlayback(seg)
+            } label: {
+                Image(systemName: playing ? "stop.fill" : "play.fill")
+                    .frame(width: 14, height: 14)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help(playing ? "停止回听本句" : "回听本句（云端 VAD 起止）")
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(seg.timeLabel)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    if !seg.speaker.isEmpty {
+                        Text(seg.speaker)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.accentColor)
+                    }
+                }
+                Text(seg.text)
+                    .font(.body)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            playing ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.04),
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+        )
     }
 }

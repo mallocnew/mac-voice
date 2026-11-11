@@ -19,6 +19,12 @@ enum AudioPlaybackError: LocalizedError {
     }
 }
 
+/// 按句回听的音频区间（秒）。起止点来自云端 VAD 结果。
+struct PlaybackRange: Equatable {
+    let start: Double
+    let end: Double
+}
+
 @MainActor
 final class AudioPlayer: ObservableObject {
     @Published private(set) var isPlaying = false
@@ -26,15 +32,20 @@ final class AudioPlayer: ObservableObject {
     @Published private(set) var duration: TimeInterval = 0
     @Published private(set) var isReady = false
     @Published private(set) var lastError: String?
+    /// 当前按句回听的区间（云端 VAD 起止），无则 nil。
+    @Published private(set) var activeRange: PlaybackRange?
 
     private var player: AVPlayer?
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var statusObserver: NSKeyValueObservation?
+    private var segmentEndObserver: Any?
     private var loadedURL: URL?
 
     var currentTimeLabel: String { Self.format(currentTime) }
     var durationLabel: String { Self.format(duration) }
+    /// 当前已加载音频的路径（用于判断是否需要重新 load）。
+    var loadedURLPath: String? { loadedURL?.path }
 
     var progress: Double {
         guard duration > 0 else { return 0 }
@@ -44,6 +55,7 @@ final class AudioPlayer: ObservableObject {
     func load(_ url: URL?) {
         stop()
         clearObservers()
+        clearSegmentPlayback()
         player = nil
         loadedURL = nil
         isReady = false
@@ -134,6 +146,62 @@ final class AudioPlayer: ObservableObject {
         }
     }
 
+    // MARK: - 按句回听（区间播放）
+
+    /// 播放云端分段的 [start, end]；再次点击同一句则停止。
+    func toggleSegmentPlay(start: Double, end: Double) {
+        guard let player, isReady else { return }
+        // 正在回听同一句 → 停止
+        if let active = activeRange, active.start == start, active.end == end, isPlaying {
+            stopSegmentPlayback()
+            player.pause()
+            isPlaying = false
+            currentTime = 0
+            return
+        }
+        // 切到别的句或重新播放
+        clearSegmentObserver()
+        seek(to: start)
+        setupSegmentEndBoundary(at: end)
+        player.play()
+        isPlaying = true
+        activeRange = PlaybackRange(start: start, end: end)
+    }
+
+    func stopSegmentPlayback() {
+        clearSegmentObserver()
+        activeRange = nil
+    }
+
+    private func setupSegmentEndBoundary(at seconds: Double) {
+        let time = CMTime(seconds: seconds, preferredTimescale: 600)
+        segmentEndObserver = player?.addBoundaryTimeObserver(
+            forTimes: [NSValue(time: time)],
+            queue: .main
+        ) { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.clearSegmentObserver()
+                self.activeRange = nil
+                self.player?.pause()
+                self.isPlaying = false
+                self.currentTime = seconds
+            }
+        }
+    }
+
+    private func clearSegmentObserver() {
+        if let segmentEndObserver, let player {
+            player.removeTimeObserver(segmentEndObserver)
+        }
+        segmentEndObserver = nil
+    }
+
+    private func clearSegmentPlayback() {
+        clearSegmentObserver()
+        activeRange = nil
+    }
+
     func pause() {
         player?.pause()
         isPlaying = false
@@ -144,6 +212,7 @@ final class AudioPlayer: ObservableObject {
         player?.seek(to: .zero)
         isPlaying = false
         currentTime = 0
+        clearSegmentPlayback()
     }
 
     func seek(to seconds: TimeInterval) {

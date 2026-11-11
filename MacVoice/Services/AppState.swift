@@ -4,6 +4,27 @@ import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 
+enum RecordingMode: String, CaseIterable, Identifiable {
+    case standard
+    case allScene
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .standard: return "普通录音"
+        case .allScene: return "全场景"
+        }
+    }
+
+    var help: String {
+        switch self {
+        case .standard: return "仅录制麦克风"
+        case .allScene: return "同时录制麦克风与系统声音，可后台持续录制"
+        }
+    }
+}
+
 enum InputMode: String, CaseIterable, Identifiable {
     case file
     case record
@@ -26,6 +47,10 @@ final class AppState: ObservableObject {
 
     @Published var inputMode: InputMode = .file
     @Published var showAPIKeySheet = false
+
+    @Published var recordingMode: RecordingMode {
+        didSet { UserDefaults.standard.set(recordingMode.rawValue, forKey: Self.recordingModeKey) }
+    }
 
     @Published var apiKeyInput: String = ""
     @Published var hasSavedKey: Bool = false
@@ -52,13 +77,15 @@ final class AppState: ObservableObject {
     private var task: Task<Void, Never>?
     /// 高频电平/进度由面板直接观察，避免经 AppState 整树刷新。
     let recorder = AudioRecorder()
+    let allSceneRecorder = AllSceneRecorder()
     let audioPlayer = AudioPlayer()
     private var cancellables = Set<AnyCancellable>()
     private var persistTranscriptTask: Task<Void, Never>?
     private var suppressPersist = false
     private static let modelKey = "fileAsrFn"
+    private static let recordingModeKey = "recordingMode"
 
-    var isRecording: Bool { recorder.isRecording }
+    var isRecording: Bool { recorder.isRecording || allSceneRecorder.isRecording }
 
     var isPlayingAudio: Bool { audioPlayer.isPlaying }
     var canPlayAudio: Bool { audioPlayer.isReady && !isRecording }
@@ -83,9 +110,17 @@ final class AppState: ObservableObject {
     init() {
         let saved = UserDefaults.standard.string(forKey: Self.modelKey) ?? ""
         selectedModel = AsrModel(rawValue: saved) ?? .general
+        let savedMode = UserDefaults.standard.string(forKey: Self.recordingModeKey) ?? ""
+        recordingMode = RecordingMode(rawValue: savedMode) ?? .standard
         reloadAPIKey()
         // 只转发低频状态（开始/停止录音、播放就绪等），不要转发电平与进度 tick。
         recorder.$isRecording
+            .dropFirst()
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
+        allSceneRecorder.$isRecording
             .dropFirst()
             .sink { [weak self] _ in
                 self?.objectWillChange.send()
@@ -320,6 +355,21 @@ final class AppState: ObservableObject {
         audioPlayer.stop()
     }
 
+    /// 按句回听：播放云端分段的 [start, end]。
+    func toggleSegmentPlayback(_ seg: TranscriptSegment) {
+        guard !isRecording else { return }
+        guard let url = selectedFileURL ?? currentSession.flatMap(SessionStore.mediaFileURL),
+              FileManager.default.fileExists(atPath: url.path) else {
+            errorMessage = AudioPlaybackError.missingFile.localizedDescription
+            return
+        }
+        if audioPlayer.loadedURLPath != url.path {
+            audioPlayer.load(url)
+        }
+        guard audioPlayer.isReady else { return }
+        audioPlayer.toggleSegmentPlay(start: seg.start, end: seg.end)
+    }
+
     private static func isAutoTimeTitle(_ title: String) -> Bool {
         // 匹配「M月d日 HH:mm」自动标题，便于被文件名覆盖
         title.range(of: #"^\d{1,2}月\d{1,2}日 \d{2}:\d{2}$"#, options: .regularExpression) != nil
@@ -397,20 +447,19 @@ final class AppState: ObservableObject {
     func startRecording() {
         guard !isTranscribing else { return }
         Task {
-            let permission = MicrophonePermission.current
-            if permission == .denied {
-                micPermissionDenied = true
-                errorMessage = AudioRecorderError.permissionDenied.localizedDescription
-                return
-            }
-            if permission == .undetermined {
-                let granted = await MicrophonePermission.request()
-                if !granted {
-                    micPermissionDenied = true
-                    errorMessage = AudioRecorderError.permissionDenied.localizedDescription
+            guard await ensureMicPermission() else { return }
+
+            if recordingMode == .allScene, allSceneRecorder.systemEnabled {
+                // 屏幕录音授权：未授权则引导开启（系统授权后需重启应用）
+                if !ScreenRecordingPermission.isGranted {
+                    ScreenRecordingPermission.request()
+                    allSceneRecorder.systemEnabled = false
+                    errorMessage = AllSceneError.screenPermissionDenied.localizedDescription
+                    statusHint = "请到「系统设置 → 隐私与安全性 → 屏幕与系统录音」授权，并重启本应用"
                     return
                 }
             }
+
             micPermissionDenied = false
             errorMessage = ""
             stopPlayback()
@@ -421,31 +470,49 @@ final class AppState: ObservableObject {
                 createSession(select: true)
             }
 
-            do {
-                _ = try recorder.start()
-                selectedFileURL = nil
-                selectedFileName = ""
-                selectedFileSize = 0
-                suppressPersist = true
-                resultText = ""
-                segments = []
-                duration = 0
-                suppressPersist = false
-                inputMode = .record
-                statusHint = "录音中…"
-            } catch {
-                errorMessage = (error as? LocalizedError)?.errorDescription
-                    ?? error.localizedDescription
+            if recordingMode == .allScene {
+                do {
+                    try allSceneRecorder.start()
+                } catch {
+                    errorMessage = (error as? LocalizedError)?.errorDescription
+                        ?? error.localizedDescription
+                    return
+                }
+            } else {
+                do {
+                    _ = try recorder.start()
+                } catch {
+                    errorMessage = (error as? LocalizedError)?.errorDescription
+                        ?? error.localizedDescription
+                    return
+                }
             }
+
+            selectedFileURL = nil
+            selectedFileName = ""
+            selectedFileSize = 0
+            suppressPersist = true
+            resultText = ""
+            segments = []
+            duration = 0
+            suppressPersist = false
+            inputMode = .record
+            statusHint = recordingMode == .allScene ? "全场景录音中（后台可继续）…" : "录音中…"
         }
     }
 
     func stopRecording(transcribeAfter: Bool) {
-        guard let url = recorder.stop() else { return }
-        let name = "录音 \(defaultSessionTitle()).m4a"
-        attachMedia(from: url, source: .record, displayName: name)
-        // 临时文件可删
-        try? FileManager.default.removeItem(at: url)
+        if recordingMode == .allScene {
+            guard let url = allSceneRecorder.stop() else { return }
+            let name = "全场景录音 \(defaultSessionTitle()).m4a"
+            attachMedia(from: url, source: .record, displayName: name)
+            try? FileManager.default.removeItem(at: url)
+        } else {
+            guard let url = recorder.stop() else { return }
+            let name = "录音 \(defaultSessionTitle()).m4a"
+            attachMedia(from: url, source: .record, displayName: name)
+            try? FileManager.default.removeItem(at: url)
+        }
         statusHint = transcribeAfter
             ? "录音完成，开始转写…"
             : "录音完成，可转写或导出音频"
@@ -455,8 +522,51 @@ final class AppState: ObservableObject {
     }
 
     func cancelRecording() {
-        recorder.cancel()
+        if recordingMode == .allScene {
+            allSceneRecorder.cancel()
+        } else {
+            recorder.cancel()
+        }
         statusHint = "已取消录音"
+    }
+
+    /// 请求麦克风权限，未授权时提示并返回 false。
+    private func ensureMicPermission() async -> Bool {
+        let permission = MicrophonePermission.current
+        if permission == .denied {
+            micPermissionDenied = true
+            errorMessage = AudioRecorderError.permissionDenied.localizedDescription
+            return false
+        }
+        if permission == .undetermined {
+            let granted = await MicrophonePermission.request()
+            if !granted {
+                micPermissionDenied = true
+                errorMessage = AudioRecorderError.permissionDenied.localizedDescription
+                return false
+            }
+        }
+        return true
+    }
+
+    /// 全场景：切换系统声音开关；未授权时请求并回退。
+    func setAllSceneSystemEnabled(_ enabled: Bool) {
+        guard enabled else {
+            allSceneRecorder.systemEnabled = false
+            return
+        }
+        if ScreenRecordingPermission.isGranted {
+            allSceneRecorder.systemEnabled = true
+        } else {
+            ScreenRecordingPermission.request()
+            if ScreenRecordingPermission.isGranted {
+                allSceneRecorder.systemEnabled = true
+            } else {
+                allSceneRecorder.systemEnabled = false
+                errorMessage = AllSceneError.screenPermissionDenied.localizedDescription
+                statusHint = "请到「系统设置 → 隐私与安全性 → 屏幕与系统录音」授权后，重启本应用"
+            }
+        }
     }
 
     func exportAudio() {

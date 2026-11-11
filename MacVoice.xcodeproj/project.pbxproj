@@ -10,6 +10,7 @@
 		0B63CF247B7145A1AB9B8DFB73E131E1 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9887AD97CB834A01BF3C1810E0CDF6C0 /* SettingsView.swift */; };
 		0DA5E2D9B56C4BA3A3B67C2D317EBD0F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DE2F22654F8C406089AC87CB871F1C78 /* Assets.xcassets */; };
 		11A6B7FCAE854106A646F06CFCF026A9 /* AudioRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 566EEFC870E64515882F7A658E0EF8EF /* AudioRecorder.swift */; };
+		AA1B2C3D4E5F60718293A4B5C /* AllSceneRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB2C3D4E5F60718293A4B5C6D /* AllSceneRecorder.swift */; };
 		4601EBCF7BD848B28AE9CBE044D82027 /* ModelPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10CA69751F0E4FFF8DB6560909692965 /* ModelPickerView.swift */; };
 		4C7A0F34B6E54781940FBF9B051683B9 /* AsrModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E42C160A2EB48D19AE74E86ED874A0F /* AsrModel.swift */; };
 		70359B47E9214BC8AD8179440738AACB /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 915B408266774B55A2F828011271397D /* KeychainStore.swift */; };
@@ -38,6 +39,7 @@
 		3DF8E17DEE3146DB96312DD8DA379550 /* RecordPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordPanelView.swift; sourceTree = "<group>"; };
 		41259595E55A46CD8FDCD46ACDB2437C /* DropZoneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DropZoneView.swift; sourceTree = "<group>"; };
 		566EEFC870E64515882F7A658E0EF8EF /* AudioRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorder.swift; sourceTree = "<group>"; };
+		BB2C3D4E5F60718293A4B5C6D /* AllSceneRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AllSceneRecorder.swift; sourceTree = "<group>"; };
 		5E42C160A2EB48D19AE74E86ED874A0F /* AsrModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsrModel.swift; sourceTree = "<group>"; };
 		915B408266774B55A2F828011271397D /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		9887AD97CB834A01BF3C1810E0CDF6C0 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -96,6 +98,7 @@
 				A77CD3AC13DA43A795438F0524153A91 /* AppState.swift */,
 				EB4EB2E19A2640FB9CA0B48D2A7739EB /* AudioPlayer.swift */,
 				566EEFC870E64515882F7A658E0EF8EF /* AudioRecorder.swift */,
+				BB2C3D4E5F60718293A4B5C6D /* AllSceneRecorder.swift */,
 				915B408266774B55A2F828011271397D /* KeychainStore.swift */,
 				B904F849C60D496687877A32C8678A5D /* SessionStore.swift */,
 				F19726D1F68E4E65ABE75BB43861B180 /* SiliconFlowClient.swift */,
@@ -214,6 +217,7 @@
 				BE060A2FEEF0422F965C0A08F3DCAC01 /* VoiceSession.swift in Sources */,
 				B68A4C5384824729A247525771830756 /* AppState.swift in Sources */,
 				11A6B7FCAE854106A646F06CFCF026A9 /* AudioRecorder.swift in Sources */,
+				AA1B2C3D4E5F60718293A4B5C /* AllSceneRecorder.swift in Sources */,
 				80FAA3E4C3784D078178FE374AFEBB4C /* AudioPlayer.swift in Sources */,
 				70359B47E9214BC8AD8179440738AACB /* KeychainStore.swift in Sources */,
 				2DF28C76E6E44BC7A32ADCEC274FE7EF /* SessionStore.swift in Sources */,
