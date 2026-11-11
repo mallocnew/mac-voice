@@ -101,13 +101,22 @@ final class AudioPlayer: ObservableObject {
             }
         }
 
+        // 与录音计时一致：仅按整秒刷新进度 UI，不做亚秒级实时绘制。
         timeObserver = player.addPeriodicTimeObserver(
-            forInterval: CMTime(seconds: 0.1, preferredTimescale: 600),
+            forInterval: CMTime(seconds: 1, preferredTimescale: 1),
             queue: .main
         ) { [weak self] time in
+            guard let self else { return }
             Task { @MainActor in
-                self?.currentTime = time.seconds.isFinite ? time.seconds : 0
-                self?.isPlaying = self?.player?.rate != 0
+                let seconds = time.seconds.isFinite ? time.seconds : 0
+                let displayed = Int(seconds)
+                if displayed != Int(self.currentTime) {
+                    self.currentTime = TimeInterval(displayed)
+                }
+                let playing = self.player?.rate != 0
+                if self.isPlaying != playing {
+                    self.isPlaying = playing
+                }
             }
         }
     }

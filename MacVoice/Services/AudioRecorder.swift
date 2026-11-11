@@ -47,17 +47,12 @@ enum AudioRecorderError: LocalizedError {
 @MainActor
 final class AudioRecorder: NSObject, ObservableObject {
     @Published private(set) var isRecording = false
-    @Published private(set) var elapsed: TimeInterval = 0
-    @Published private(set) var meteringLevel: Float = 0
+    /// 每秒更新一次计时文案；不做实时电平绘制。
+    @Published private(set) var elapsedLabel = "00:00"
 
     private var recorder: AVAudioRecorder?
     private var timer: Timer?
     private var outputURL: URL?
-
-    var elapsedLabel: String {
-        let total = Int(elapsed)
-        return String(format: "%02d:%02d", total / 60, total % 60)
-    }
 
     func start() throws -> URL {
         guard !isRecording else { throw AudioRecorderError.alreadyRecording }
@@ -75,15 +70,14 @@ final class AudioRecorder: NSObject, ObservableObject {
 
         do {
             let recorder = try AVAudioRecorder(url: url, settings: settings)
-            recorder.isMeteringEnabled = true
+            recorder.isMeteringEnabled = false
             recorder.prepareToRecord()
             guard recorder.record() else {
                 throw AudioRecorderError.setupFailed("录音器未能启动")
             }
             self.recorder = recorder
             self.outputURL = url
-            self.elapsed = 0
-            self.meteringLevel = 0
+            self.elapsedLabel = Self.formatElapsed(0)
             self.isRecording = true
             startTimer()
             return url
@@ -99,7 +93,6 @@ final class AudioRecorder: NSObject, ObservableObject {
         recorder?.stop()
         stopTimer()
         isRecording = false
-        meteringLevel = 0
         let url = outputURL
         recorder = nil
         outputURL = nil
@@ -116,21 +109,28 @@ final class AudioRecorder: NSObject, ObservableObject {
 
     private func startTimer() {
         stopTimer()
-        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            guard let self else { return }
             Task { @MainActor in
-                guard let self, let recorder = self.recorder else { return }
-                self.elapsed = recorder.currentTime
-                recorder.updateMeters()
-                // averagePower 约 -160…0 dB，映射到 0…1
-                let power = recorder.averagePower(forChannel: 0)
-                let normalized = max(0, min(1, (power + 50) / 50))
-                self.meteringLevel = normalized
+                self.tick()
             }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    private func tick() {
+        guard let recorder else { return }
+        elapsedLabel = Self.formatElapsed(Int(recorder.currentTime))
     }
 
     private func stopTimer() {
         timer?.invalidate()
         timer = nil
+    }
+
+    private static func formatElapsed(_ total: Int) -> String {
+        let clamped = max(0, total)
+        return String(format: "%02d:%02d", clamped / 60, clamped % 60)
     }
 }

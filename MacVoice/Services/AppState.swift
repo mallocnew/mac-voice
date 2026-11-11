@@ -50,24 +50,18 @@ final class AppState: ObservableObject {
     @Published var currentSessionID: UUID?
 
     private var task: Task<Void, Never>?
-    private let recorder = AudioRecorder()
-    private let audioPlayer = AudioPlayer()
+    /// 高频电平/进度由面板直接观察，避免经 AppState 整树刷新。
+    let recorder = AudioRecorder()
+    let audioPlayer = AudioPlayer()
     private var cancellables = Set<AnyCancellable>()
     private var persistTranscriptTask: Task<Void, Never>?
     private var suppressPersist = false
     private static let modelKey = "fileAsrFn"
 
     var isRecording: Bool { recorder.isRecording }
-    var recordElapsedLabel: String { recorder.elapsedLabel }
-    var meterLevel: Float { recorder.meteringLevel }
 
     var isPlayingAudio: Bool { audioPlayer.isPlaying }
     var canPlayAudio: Bool { audioPlayer.isReady && !isRecording }
-    var playbackProgress: Double { audioPlayer.progress }
-    var playbackDuration: Double { audioPlayer.duration }
-    var playbackCurrentLabel: String { audioPlayer.currentTimeLabel }
-    var playbackDurationLabel: String { audioPlayer.durationLabel }
-    var playbackErrorMessage: String? { audioPlayer.lastError }
     var showsPlaybackBar: Bool {
         selectedFileURL != nil && !isRecording
     }
@@ -90,18 +84,23 @@ final class AppState: ObservableObject {
         let saved = UserDefaults.standard.string(forKey: Self.modelKey) ?? ""
         selectedModel = AsrModel(rawValue: saved) ?? .general
         reloadAPIKey()
-        recorder.objectWillChange
-            .receive(on: RunLoop.main)
+        // 只转发低频状态（开始/停止录音、播放就绪等），不要转发电平与进度 tick。
+        recorder.$isRecording
+            .dropFirst()
             .sink { [weak self] _ in
                 self?.objectWillChange.send()
             }
             .store(in: &cancellables)
-        audioPlayer.objectWillChange
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in
-                self?.objectWillChange.send()
-            }
-            .store(in: &cancellables)
+        Publishers.Merge3(
+            audioPlayer.$isPlaying.map { _ in () },
+            audioPlayer.$isReady.map { _ in () },
+            audioPlayer.$lastError.map { _ in () }
+        )
+        .dropFirst()
+        .sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        .store(in: &cancellables)
 
         sessions = SessionStore.loadSessions()
         if let first = sessions.first {

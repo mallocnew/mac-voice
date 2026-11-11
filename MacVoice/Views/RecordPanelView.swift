@@ -5,28 +5,34 @@ struct RecordPanelView: View {
     @EnvironmentObject private var appState: AppState
 
     var body: some View {
+        RecordPanelContent(appState: appState, recorder: appState.recorder)
+    }
+}
+
+private struct RecordPanelContent: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject var recorder: AudioRecorder
+
+    var body: some View {
         VStack(spacing: 18) {
             ZStack {
                 Circle()
-                    .fill(appState.isRecording
+                    .fill(recorder.isRecording
                           ? Color.red.opacity(0.12)
                           : Color.primary.opacity(0.04))
                     .frame(width: 120, height: 120)
-                    .scaleEffect(appState.isRecording ? 1 + CGFloat(appState.meterLevel) * 0.18 : 1)
-                    .animation(.easeOut(duration: 0.1), value: appState.meterLevel)
 
-                Image(systemName: appState.isRecording ? "waveform" : "mic.fill")
+                Image(systemName: "mic.fill")
                     .font(.system(size: 36, weight: .medium))
-                    .foregroundStyle(appState.isRecording ? Color.red : Color.accentColor)
-                    .symbolEffect(.variableColor.iterative, isActive: appState.isRecording)
+                    .foregroundStyle(recorder.isRecording ? Color.red : Color.accentColor)
             }
 
-            Text(appState.isRecording ? appState.recordElapsedLabel : recordIdleTitle)
+            Text(recorder.isRecording ? recorder.elapsedLabel : recordIdleTitle)
                 .font(.system(.title3, design: .rounded).monospacedDigit().weight(.semibold))
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
 
-            Text(appState.isRecording
+            Text(recorder.isRecording
                  ? "停止后可转写或导出录音文件"
                  : "录音保存为 m4a（16kHz 单声道），并记入当前会话")
                 .font(.callout)
@@ -34,7 +40,7 @@ struct RecordPanelView: View {
                 .multilineTextAlignment(.center)
 
             HStack(spacing: 12) {
-                if appState.isRecording {
+                if recorder.isRecording {
                     Button {
                         appState.stopRecording(transcribeAfter: false)
                     } label: {
@@ -87,7 +93,7 @@ struct RecordPanelView: View {
                 }
             }
 
-            if !appState.isRecording, let name = appState.selectedFileName.nilIfEmpty {
+            if !recorder.isRecording, let name = appState.selectedFileName.nilIfEmpty {
                 HStack(spacing: 8) {
                     Image(systemName: "waveform")
                         .foregroundStyle(.secondary)
